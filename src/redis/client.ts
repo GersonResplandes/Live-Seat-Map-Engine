@@ -11,6 +11,8 @@ export const redisClient = new Redis(REDIS_URL);
 export const pubClient = new Redis(REDIS_URL);
 export const subClient = pubClient.duplicate();
 
+const LOCKED_SEATS_KEY = 'index:locked_seats';
+
 redisClient.on('connect', () => console.log('✅ Redis Client Connected'));
 redisClient.on('error', (err) => console.error('❌ Redis Client Error', err));
 
@@ -33,27 +35,44 @@ subClient.on('error', (err) => console.error('❌ Redis Sub Client Error', err))
  */
 export const atomicLockSeat = async (seatId: string, userId: string): Promise<boolean> => {
   const key = `seat:${seatId}`;
-  // "OK" if set, null if not set (already exists)
+
+  // Use pipeline to ensure we add to index immediately if lock succeeds
+  // NOTE: This is optimistic. Ideally we should use Lua script for 100% atomicity between Key Set and Index Add.
+  // For Phase 1, we stick to TS logic but improving lookups.
+
+  // 1. Try to set lock
   const result = await redisClient.set(key, userId, 'EX', 300, 'NX');
-  return result === 'OK';
+
+  if (result === 'OK') {
+    // 2. Add to index
+    await redisClient.sadd(LOCKED_SEATS_KEY, seatId);
+    return true;
+  }
+
+  return false;
 };
 
 /**
  * atomicReleaseSeat
  * Releases a lock ONLY if it belongs to the user.
- * Uses a Lua script to ensure atomicity (Check if Owner -> Delete).
+ * Uses a Lua script to ensure atomicity (Check if Owner -> Delete -> Remove from Index).
  */
 export const atomicReleaseSeat = async (seatId: string, userId: string): Promise<boolean> => {
   const key = `seat:${seatId}`;
-  // Lua script: Get key. If val == userId, DEL key.
+  const indexKey = LOCKED_SEATS_KEY;
+
+  // Lua script: Get key. If val == userId, DEL key AND SREM from index.
   const script = `
         if redis.call("get", KEYS[1]) == ARGV[1] then
-            return redis.call("del", KEYS[1])
+            redis.call("del", KEYS[1])
+            redis.call("srem", KEYS[2], ARGV[2])
+            return 1
         else
             return 0
         end
     `;
-  const result = await redisClient.eval(script, 1, key, userId);
+  // KEYS[1]=seatKey, KEYS[2]=indexKey, ARGV[1]=userId, ARGV[2]=seatId
+  const result = await redisClient.eval(script, 2, key, indexKey, userId, seatId);
   return result === 1;
 };
 
@@ -67,29 +86,33 @@ export const getSeatOwner = async (seatId: string): Promise<string | null> => {
 
 /**
  * getAllLockedSeats
- * Scans all seat keys to return current state.
+ * Uses Set Members to return state O(1) instead of SCAN/KEYS O(N).
  * Returns array of { seatId, userId }
  */
 export const getAllLockedSeats = async (): Promise<{ seatId: string; userId: string }[]> => {
-  // Scan for keys starting with "seat:"
-  // Note: In production with millions of keys, SCAN is better than KEYS.
-  const keys = await redisClient.keys('seat:*');
+  // Get all seat IDs from the index set
+  const seatIds = await redisClient.smembers(LOCKED_SEATS_KEY);
 
-  if (keys.length === 0) return [];
+  if (seatIds.length === 0) return [];
 
   const pipeline = redisClient.pipeline();
-  keys.forEach((key) => pipeline.get(key));
+  seatIds.forEach((seatId) => pipeline.get(`seat:${seatId}`));
   const results = await pipeline.exec();
 
   const lockedSeats: { seatId: string; userId: string }[] = [];
 
   results?.forEach((result, index) => {
     const [err, userId] = result;
+    // If seat key expired but still in set (lazy cleanup), we might get null here.
+    // In a real app we would cleanup the set here too.
     if (!err && userId) {
       lockedSeats.push({
-        seatId: keys[index].replace('seat:', ''),
+        seatId: seatIds[index],
         userId: userId as string,
       });
+    } else if (!userId) {
+      // Self-repair: Remove from set if key is gone
+      redisClient.srem(LOCKED_SEATS_KEY, seatIds[index]);
     }
   });
 

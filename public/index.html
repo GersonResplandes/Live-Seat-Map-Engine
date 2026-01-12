@@ -77,13 +77,16 @@
     <script src="/socket.io/socket.io.js"></script>
     <script>
         // --- 1. Initialize Socket ---
-        const socket = io();
+        const socket = io({
+            auth: {
+                token: "guest_token_123" // Simulating a token
+            }
+        });
         const grid = document.getElementById('grid');
         const statusDiv = document.getElementById('status');
         
-        // Generate User ID (Simulated)
-        const userId = 'user_' + Math.random().toString(36).substr(2, 9);
-        console.log('My User ID:', userId);
+        // User ID will be assigned by server (Security Phase 1)
+        let userId = null; 
 
         // --- 2. Generate Grid (10x10) ---
         const rows = ['A','B','C','D','E','F','G','H','I','J'];
@@ -123,8 +126,14 @@
         // --- 4. Socket Events ---
         
         socket.on('connect', () => {
-            statusDiv.innerText = `Conectado como ${userId}`;
+            // Ask server who I am
+            socket.emit('whoami');
             socket.emit('join_room', 'cinema_1');
+        });
+
+        socket.on('your_identity', (id) => {
+            userId = id;
+            statusDiv.innerText = `Conectado como ${userId}`;
         });
 
         socket.on('disconnect', () => {
