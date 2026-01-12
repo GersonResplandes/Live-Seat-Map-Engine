@@ -77,9 +77,18 @@
     <script src="/socket.io/socket.io.js"></script>
     <script>
         // --- 1. Initialize Socket ---
+        // Verify session storage to keep identity on refresh, but new identity on new tab
+        let storedToken = sessionStorage.getItem('seat_map_token');
+        if (!storedToken) {
+            // No "user_" prefix needed here, server adds it if it wants, or we keep it clean.
+            // Handler adds "user_", so let's send just the random ID to avoid "user_user_"
+            storedToken = Math.random().toString(36).substr(2, 9);
+            sessionStorage.setItem('seat_map_token', storedToken);
+        }
+
         const socket = io({
             auth: {
-                token: "guest_token_123" // Simulating a token
+                token: storedToken
             }
         });
         const grid = document.getElementById('grid');
