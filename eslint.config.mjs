@@ -8,7 +8,7 @@ import globals from 'globals';
 
 export default tseslint.config(
   {
-    ignores: ['dist', 'eslint.config.mjs'],
+    ignores: ['dist', 'eslint.config.mjs', 'jest.config.js'],
   },
   // Base Integ
   eslint.configs.recommended,
@@ -32,7 +32,7 @@ export default tseslint.config(
         ...globals.node,
       },
       parserOptions: {
-        project: true,
+        project: ['./tsconfig.json', './tsconfig.test.json'],
         tsconfigRootDir: import.meta.dirname,
       },
     },

@@ -1,7 +1,7 @@
 {
   "name": "live-seat-map-engine",
   "version": "1.0.0",
-  "description": "",
+  "description": "High-concurrency real-time seat serving system using Node.js, Socket.io, and Redis with atomic locking and strict race-condition handling.",
   "main": "index.js",
   "scripts": {
     "build": "tsc",
@@ -12,7 +12,18 @@
     "test": "jest",
     "prepare": "husky"
   },
-  "keywords": [],
+  "keywords": [
+    "nodejs",
+    "typescript",
+    "socket-io",
+    "redis",
+    "real-time",
+    "concurrency",
+    "atomic-locking",
+    "backend",
+    "clean-architecture",
+    "websockets"
+  ],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
