@@ -1,96 +1,115 @@
-# 🎟️ Live Seat Map Engine (Real-Time WebSocket)
+# Live Seat Map Engine
+![CI Status](https://github.com/GersonResplandes/Live-Seat-Map-Engine/actions/workflows/ci.yml/badge.svg)
 
-![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white)
-![Node.js](https://img.shields.io/badge/Node.js-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)
-![Redis](https://img.shields.io/badge/Redis-DC382D?style=for-the-badge&logo=redis&logoColor=white)
-![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)
+**[🇧🇷 Leia em Português](README_pt-br.md)**
 
-Um motor de reserva de assentos de alta performance em tempo real. Este projeto demonstra o uso de **WebSockets** e **Redis** para gerenciar estados efêmeros e resolver condições de corrida (Race Conditions) em ambientes distribuídos.
+High-performance real-time seat reservation system demonstrating **Atomic Locking**, **Strict Concurrency Control**, and **Distributed State Management** using Node.js and Redis.
 
 ---
 
-## ⚡ O Desafio Técnico
-
-Em sistemas de ingressos (como Ticketmaster ou cinema), o maior gargalo não é a compra final, mas o **bloqueio temporário (Hold)**.
-
-1.  **Concorrência Extrema**: Múltiplos usuários clicam no mesmo assento no mesmo milissegundo.
-2.  **Feedback Visual**: O estado precisa ser propagado em <50ms.
-3.  **Estado Efêmero**: Se o usuário desconecta, o assento deve ser liberado instantaneamente.
-
-**Solução:** Uma arquitetura baseada em eventos onde o **Redis** atua como a "Fonte da Verdade" (Single Source of Truth) para o estado temporário e o **Socket.io** gerencia o broadcast via Redis Adapter para escalabilidade horizontal.
-
----
-
-## 🏗️ Arquitetura
+## 🔒 Atomic Locking Flow (Race Condition Proof)
 
 ```mermaid
 sequenceDiagram
-    participant Client A
-    participant Client B
-    participant Server as Node.js Cluster
-    participant Redis as Redis (Pub/Sub + Storage)
+    participant Client
+    participant Controller
+    participant Service
+    participant Redis
 
-    Client A->>Server: 🎫 Request Seat (A1)
+    Client->>Controller: emit("request_seat", { seatId: "A1" })
     
     rect rgb(20, 20, 20)
-        note right of Server: Atomic Check (SET NX)
-        Server->>Redis: SET seat:A1 "UserA" NX EX 300
-        Redis-->>Server: OK (Success)
+        note right of Controller: 1. Rate Limit Check
+        Controller->>Redis: INCR rate:limit:user:123
+        Redis-->>Controller: Count <= 5
+        
+        note right of Controller: 2. Atomic Reservation
+        Controller->>Service: reserveSeat("A1")
+        Service->>Redis: SET seat:A1 "User123" NX EX 300
+        
+        alt Lock Acquired (Success)
+            Redis-->>Service: OK
+            Service->>Controller: true
+            Controller->>Client: broadcast("seat_locked", "A1")
+        else Lock Failed (Already Taken)
+            Redis-->>Service: null
+            Service->>Controller: false
+            Controller->>Client: emit("error", "Seat taken")
+        end
     end
-
-    par Broadcast
-        Server->>Client A: ✅ Seat Locked (You)
-        Server->>Client B: 🚫 Seat A1 Taken (Red)
-    end
-
-    Client B->>Server: 🎫 Request Seat (A1)
-    Server->>Redis: SET seat:A1 "UserB" NX EX 300
-    Redis-->>Server: NULL (Fail)
-    Server->>Client B: ❌ Error: Already Reserved
 ```
 
-### Decisões de Engenharia
+---
 
-1.  **Concorrência Pessimista Atômica**: Utilizamos `SET resource_id user_id NX EX 300`. A flag `NX` (Not Exists) garante que o Redis só aceite a escrita se a chave não existir. Isso é atômico e elimina Race Conditions sem precisar de locks complexos.
-2.  **Tratamento de Desconexões**: Um Set no Redis mapeia `socket_id -> [seats]`. No evento `disconnect`, o servidor apaga as chaves desse socket, liberando os assentos imediatamente.
+## 🏗 Why this exists?
+
+Real-time inventory systems (Tickets, Cinemas, Airlines) face significant challenges:
+1.  **Race Conditions:** Two users booking the same seat simultaneously.
+2.  **Zombie Locks:** Users selecting seats and closing the browser without purchasing.
+3.  **Scale:** Broadcasting changes to thousands of connected clients instantly.
+
+This project solves these problems using **Redis Atomic Operations** for locking and **Socket.io** for efficient state propagation.
 
 ---
 
-## 🚀 Como Rodar Localmente
+## 🚀 Key Features
 
-### Pré-requisitos
-- Docker e Docker Compose.
-- Node.js 18+.
+### 1. Atomic Locking (`SET NX`)
+Eliminates race conditions by using Redis's native atomic `SET ... NX` command.
+- *Result:* No complex software-level mutexes are needed. The database enforces uniqueness at the lowest level.
 
-### Passos
+### 2. Zero Zombie Reservations
+Implements a "Lease" mechanism (TTL) and Disconnect Listeners.
+- If a user closes the tab, the socket disconnection handler immediately triggers a cleanup, releasing all locks held by that session.
+- If the server crashes, Redis keys expire automatically after 5 minutes (TTL).
 
-1.  **Clone o repositório**
-    ```bash
-    git clone https://github.com/seu-usuario/live-seat-map-engine.git
-    cd live-seat-map-engine
-    ```
-
-2.  **Suba a Infraestrutura (Redis)**
-    ```bash
-    # Na pasta docker-servers ou onde estiver seu docker-compose
-    docker compose up -d redis
-    ```
-
-3.  **Instale e Rode**
-    ```bash
-    npm install
-    npm run dev
-    ```
-
-4.  **Teste**: Abra `http://localhost:3000` em duas janelas anônimas.
+### 3. Rate Limiting Protection
+Prevents abuse (e.g., a bot script trying to lock the entire theater).
+- Implemented via a "Token Bucket" style algorithm using Redis counters.
+- Limit: 5 seat requests per minute per user.
 
 ---
 
-## 🧪 Testes
+## 🛠 Tech Stack
 
-O projeto conta com validação estática via ESLint e testes manuais de concorrência.
+- **Runtime:** Node.js 20+ (TypeScript Strict Mode)
+- **Real-time:** Socket.io (with Redis Adapter for Horizontal Scaling)
+- **State/Locking:** Redis (ioredis)
+- **Validation:** Zod
+- **Testing:** Jest + ts-jest
+- **Observability:** Winston (Structured JSON Logging)
 
+---
+
+## ⚡ Quick Start
+
+### 1. Start Infrastructure
 ```bash
-# Linting
-npm run lint
+docker-compose up -d
 ```
+
+### 2. Install Dependencies
+```bash
+npm install
+```
+
+### 3. Run Locally
+```bash
+npm run dev
+# Open http://localhost:3000 in multiple tabs to test concurrency
+```
+
+### 4. Run Tests
+```bash
+npm test
+```
+
+---
+
+## 👨‍💻 Author
+
+**Gérson Resplandes**
+Backend Engineer focused on High-Concurrency & Real-Time Systems.
+
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=for-the-badge&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/gerson-resplandes)
+[![Email](https://img.shields.io/badge/Email-D14836?style=for-the-badge&logo=gmail&logoColor=white)](mailto:maiorgerson@gmail.com)
