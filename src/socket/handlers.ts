@@ -1,5 +1,6 @@
 import { Server } from 'socket.io';
 import { SeatController } from '../controllers/SeatController';
+import { logger } from '../utils/logger';
 
 export const setupSocketHandlers = (io: Server) => {
   const seatController = new SeatController(io);

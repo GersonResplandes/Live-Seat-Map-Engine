@@ -24,7 +24,7 @@ export class SeatController {
   handleConnection(socket: Socket) {
     // ... existing code
     const userId = socket.data.userId;
-    console.log(`🔌 Client connected: ${socket.id} (User: ${userId})`);
+    logger.info(`🔌 Client connected: ${socket.id}`, { userId });
 
     // --- Events ---
 
@@ -66,7 +66,7 @@ export class SeatController {
       return;
     }
 
-    console.log(`🔒 Request Lock: ${seatId} by ${userId}`);
+    logger.info(`🔒 Request Lock: ${seatId}`, { userId, seatId });
 
     // 3. Service Call
     const success = await this.seatService.reserveSeat(seatId, userId, socket.id);
@@ -92,11 +92,11 @@ export class SeatController {
   }
 
   private async handleDisconnect(socket: Socket) {
-    console.log(`❌ Disconnected: ${socket.id}`);
+    logger.info(`❌ Disconnected: ${socket.id}`);
     const releasedSeats = await this.seatService.handleDisconnect(socket.id);
 
     if (releasedSeats.length > 0) {
-      console.log(`🧹 Cleaning up ${releasedSeats.length} seats for ${socket.id}`);
+      logger.info(`🧹 Cleaning up ${releasedSeats.length} seats for ${socket.id}`, { seats: releasedSeats });
       releasedSeats.forEach((seatId) => {
         this.io.to('cinema_1').emit('seat_released', { seatId });
       });
