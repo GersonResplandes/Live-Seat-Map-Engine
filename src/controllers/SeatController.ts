@@ -8,16 +8,21 @@ interface SeatRequest {
   seatId: string;
 }
 
+import { RateLimitService } from '../services/RateLimitService';
+
 export class SeatController {
   private seatService: SeatService;
+  private rateLimitService: RateLimitService;
   private io: Server;
 
   constructor(io: Server) {
     this.io = io;
     this.seatService = new SeatService();
+    this.rateLimitService = new RateLimitService();
   }
 
   handleConnection(socket: Socket) {
+    // ... existing code
     const userId = socket.data.userId;
     console.log(`🔌 Client connected: ${socket.id} (User: ${userId})`);
 
@@ -29,6 +34,8 @@ export class SeatController {
     socket.on('release_seat', (data) => this.releaseSeat(socket, data));
     socket.on('disconnect', () => this.handleDisconnect(socket));
   }
+
+  // ... helpers
 
   private async joinRoom(socket: Socket, roomName: string) {
     socket.join(roomName);
@@ -44,14 +51,24 @@ export class SeatController {
     const { seatId } = data;
     const userId = socket.data.userId;
 
+    // 1. Validation
     const validation = SeatIdSchema.safeParse(seatId);
     if (!validation.success) {
       socket.emit('error', { message: validation.error.issues[0].message });
       return;
     }
 
+    // 2. Rate Limiting (Phase 3)
+    // Limit: 5 requests per 60 seconds
+    const isAllowed = await this.rateLimitService.isAllowed('lock_seat', userId, 5, 60);
+    if (!isAllowed) {
+      socket.emit('error', { message: 'Rate limit exceeded. Please wait a moment.' });
+      return;
+    }
+
     console.log(`🔒 Request Lock: ${seatId} by ${userId}`);
 
+    // 3. Service Call
     const success = await this.seatService.reserveSeat(seatId, userId, socket.id);
 
     if (success) {
