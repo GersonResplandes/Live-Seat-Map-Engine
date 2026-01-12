@@ -84,8 +84,10 @@ Prevents abuse (e.g., a bot script trying to lock the entire theater).
 ## ⚡ Quick Start
 
 ### 1. Start Infrastructure
+Ensure you have a Redis instance running locally or remotely.
 ```bash
-docker-compose up -d
+# Start Redis on default port 6379
+redis-server
 ```
 
 ### 2. Install Dependencies
