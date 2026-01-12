@@ -1,5 +1,6 @@
 import { Server, Socket } from 'socket.io';
 import { z } from 'zod';
+import { logger } from '../utils/logger';
 import { SeatService } from '../services/SeatService';
 
 const SeatIdSchema = z.string().regex(/^[A-J](10|[1-9])$/, 'Invalid Seat ID format (e.g. A1, B10)');
@@ -96,7 +97,9 @@ export class SeatController {
     const releasedSeats = await this.seatService.handleDisconnect(socket.id);
 
     if (releasedSeats.length > 0) {
-      logger.info(`🧹 Cleaning up ${releasedSeats.length} seats for ${socket.id}`, { seats: releasedSeats });
+      logger.info(`🧹 Cleaning up ${releasedSeats.length} seats for ${socket.id}`, {
+        seats: releasedSeats,
+      });
       releasedSeats.forEach((seatId) => {
         this.io.to('cinema_1').emit('seat_released', { seatId });
       });
